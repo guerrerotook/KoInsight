@@ -68,6 +68,12 @@ This will install dependencies for:
 
 The development database uses SQLite and is stored in the `data/` directory.
 
+Create the `data/` directory if it does not exist, otherwise the migrations will fail:
+
+```bash
+mkdir -p data
+```
+
 Run database migrations:
 
 ```bash
@@ -112,8 +118,8 @@ npm run dev
 ```
 
 This uses Turbo to run both apps in parallel:
-- **Backend server**: http://localhost:3000 (Express API)
-- **Frontend web app**: http://localhost:5173 (Vite dev server)
+- **Backend server**: http://localhost:3001 (Express API)
+- **Frontend web app**: http://localhost:3000 (Vite dev server)
 
 #### Option 2: Run Apps Individually
 
@@ -122,15 +128,15 @@ This uses Turbo to run both apps in parallel:
 cd apps/server
 npm run dev
 ```
-- Runs on http://localhost:3001
-- Watches for TypeScript changes and auto-restarts
+- Runs on http://localhost:3001 (override with `PORT`)
+- Watches for TypeScript changes and auto-restarts via nodemon
 
 **Frontend only:**
 ```bash
 cd apps/web
 npm run dev
 ```
-- Runs on http://localhost:3000
+- Runs on http://localhost:3000 (override with `VITE_WEB_PORT`)
 - Hot module replacement enabled
 
 
@@ -216,7 +222,7 @@ koinsight/
 npm run -w server knex migrate:latest
 
 # Rollback last migration
-npm run -w serverknex migrate:rollback
+npm run -w server knex migrate:rollback
 
 # Create a new migration
 npm run -w server knex migrate:make migration_name
@@ -265,6 +271,9 @@ If you need a fresh start:
 ```bash
 # Delete the database
 rm data/dev.db
+
+# Make sure the data directory exists
+mkdir -p data
 
 # Run migrations
 npm run -w server knex migrate:latest
