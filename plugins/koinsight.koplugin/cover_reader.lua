@@ -51,6 +51,7 @@ local function bb_to_png_bytes(bb)
   local file = io.open(path, "rb")
   if not file then
     logger.warn("[KoInsight] Unable to read encoded cover from:", path)
+    os.remove(path)
     return nil
   end
 

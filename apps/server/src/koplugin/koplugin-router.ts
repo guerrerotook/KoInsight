@@ -113,13 +113,7 @@ router.post('/covers/status', rejectOldPluginVersion, async (req, res) => {
 
   try {
     const validMd5s = md5s.filter((md5) => CoversService.isValidMd5(md5)) as string[];
-
-    const missing: string[] = [];
-    for (const md5 of validMd5s) {
-      if (!(await CoversService.existsForMd5(md5))) {
-        missing.push(md5);
-      }
-    }
+    const missing = await CoversService.getMissingMd5s(validMd5s);
 
     res.status(200).json({ missing });
   } catch (err) {

@@ -40,6 +40,18 @@ export class CoversService {
     return (await this.findFileForMd5(md5)) !== null;
   }
 
+  /**
+   * Returns the md5s that have no cover stored yet.
+   * Reads the covers directory once, instead of once per md5.
+   */
+  static async getMissingMd5s(md5s: string[]): Promise<string[]> {
+    this.ensureCoversDir();
+    const files = await promises.readdir(appConfig.coversPath);
+    const stored = new Set(files.map((file) => path.parse(file).name));
+
+    return md5s.filter((md5) => !stored.has(md5));
+  }
+
   static async deleteExisting(book: Book) {
     return this.deleteExistingByMd5(book.md5);
   }
