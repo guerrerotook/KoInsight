@@ -5,13 +5,13 @@
   "exports": {
     "./types": {
       "types": "./types/index.ts",
-      "require": "./dist/types/index.js",
-      "default": "./types/index.ts"
+      "module": "./types/index.ts",
+      "default": "./dist/types/index.js"
     },
     "./*": {
       "types": "./*.ts",
-      "require": "./dist/*.js",
-      "default": "./*.ts"
+      "module": "./*.ts",
+      "default": "./dist/*.js"
     }
   },
   "scripts": {
