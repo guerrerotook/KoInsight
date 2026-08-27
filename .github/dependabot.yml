@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # Keep GitHub Actions used by the CI and Release workflows up to date, so
+  # deprecated action runtimes (e.g. Node 20) are upgraded automatically.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - '*'
