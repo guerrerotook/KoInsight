@@ -354,4 +354,34 @@ function KoInsightAnnotationReader.getAllBooksWithAnnotations()
   return books_with_annotations
 end
 
+-- Get all books from reading history, regardless of whether they have annotations.
+-- Returns a list of { md5 = ..., file_path = ... } - used by the cover sync,
+-- which cares about every book, not just the ones with highlights.
+function KoInsightAnnotationReader.getAllBooksFromHistory()
+  local ReadHistory = require("readhistory")
+
+  if not ReadHistory.hist or #ReadHistory.hist == 0 then
+    logger.info("[KoInsight] No books found in reading history")
+    return {}
+  end
+
+  local books = {}
+
+  for _, history_entry in ipairs(ReadHistory.hist) do
+    local file_path = history_entry.file
+
+    -- Skip deleted files
+    if not history_entry.dim and file_path then
+      local ok, md5 = pcall(KoInsightAnnotationReader.getMd5ForPath, file_path)
+
+      if ok and md5 then
+        table.insert(books, { md5 = md5, file_path = file_path })
+      end
+    end
+  end
+
+  logger.info("[KoInsight] Found", #books, "books with a known md5 in reading history")
+  return books
+end
+
 return KoInsightAnnotationReader

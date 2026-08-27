@@ -72,7 +72,31 @@ function koinsight:addToMainMenu(menu_items)
         end,
       },
 
-      -- 5) Set server URL
+      -- 5) Sync book covers
+      {
+        text = _("Sync book covers"),
+        checked_func = function()
+          return self.koinsight_settings:getSyncCoversEnabled()
+        end,
+        callback = function()
+          self.koinsight_settings:toggleSyncCovers()
+        end,
+      },
+
+      -- 6) Re-upload book covers
+      {
+        text = _("Re-upload book covers"),
+        keep_menu_open = true,
+        enabled_func = function()
+          return self.koinsight_settings:getSyncCoversEnabled()
+        end,
+        callback = function()
+          self:resyncCovers()
+        end,
+        separator = true, -- separator line
+      },
+
+      -- 7) Set server URL
       {
         text = _("Set server URL"),
         keep_menu_open = true,
@@ -82,7 +106,7 @@ function koinsight:addToMainMenu(menu_items)
         end,
       },
 
-      -- 6) About KoInsight
+      -- 8) About KoInsight
       {
         text = _("About KoInsight"),
         keep_menu_open = true,
@@ -135,7 +159,17 @@ function koinsight:performFullSync()
     local ok, err = pcall(function()
       KoInsightUpload.syncAllBooks(url, function(progress)
         -- Update progress UI
-        if progress.phase == "syncing" then
+        if progress.phase == "covers" then
+          UIManager:close(progress_info)
+          progress_info = InfoMessage:new({
+            text = string.format(
+              _("Uploading covers: %d/%d books"),
+              progress.current,
+              progress.total
+            ),
+          })
+          UIManager:show(progress_info)
+        elseif progress.phase == "syncing" then
           UIManager:close(progress_info)
           progress_info = InfoMessage:new({
             text = string.format(
@@ -165,7 +199,7 @@ function koinsight:performFullSync()
             }))
           end
         end
-      end)
+      end, self.koinsight_settings)
     end)
 
     if not ok then
@@ -173,6 +207,56 @@ function koinsight:performFullSync()
       logger.err("[KoInsight] Full sync failed: " .. tostring(err))
       UIManager:show(InfoMessage:new({ text = _("Sync failed: " .. tostring(err)), timeout = 5 }))
     end
+  end)
+end
+
+-- Look at every book again and upload the covers the server is still missing
+function koinsight:resyncCovers()
+  local url = self.koinsight_settings:getServerURL()
+  if not url or url == "" then
+    UIManager:show(
+      InfoMessage:new({ text = _("KoInsight server URL is not configured."), timeout = 3 })
+    )
+    return
+  end
+
+  local progress_info = InfoMessage:new({
+    text = _("Starting cover sync..\nScanning reading history."),
+  })
+  UIManager:show(progress_info)
+
+  local NetworkMgr = require("ui/network/manager")
+  NetworkMgr:runWhenOnline(function()
+    local ok, uploaded = pcall(function()
+      return KoInsightUpload.resyncCovers(url, self.koinsight_settings, function(progress)
+        if progress.phase == "covers" then
+          UIManager:close(progress_info)
+          progress_info = InfoMessage:new({
+            text = string.format(
+              _("Uploading covers: %d/%d books"),
+              progress.current,
+              progress.total
+            ),
+          })
+          UIManager:show(progress_info)
+        end
+      end)
+    end)
+
+    UIManager:close(progress_info)
+
+    if not ok then
+      logger.err("[KoInsight] Cover sync failed: " .. tostring(uploaded))
+      UIManager:show(
+        InfoMessage:new({ text = _("Cover sync failed: " .. tostring(uploaded)), timeout = 5 })
+      )
+      return
+    end
+
+    UIManager:show(InfoMessage:new({
+      text = string.format(_("Cover sync complete!\n%d covers uploaded"), uploaded or 0),
+      timeout = 5,
+    }))
   end)
 end
 
@@ -240,7 +324,7 @@ function koinsight:performSyncOnSuspend()
 
   -- Perform sync in a protected call to avoid crashing on suspend
   local success, error_msg = pcall(function()
-    KoInsightUpload.syncCurrentBook(server_url, true) -- true = silent mode
+    KoInsightUpload.syncCurrentBook(server_url, true, self.koinsight_settings) -- true = silent mode
   end)
 
   if not success then
@@ -299,7 +383,7 @@ function koinsight:performAggressiveSyncOnSuspend()
 
     -- Perform the actual sync
     logger.info("[KoInsight] Performing sync")
-    KoInsightUpload.syncCurrentBook(server_url, true) -- true = silent mode
+    KoInsightUpload.syncCurrentBook(server_url, true, self.koinsight_settings) -- true = silent mode
 
     -- Turn off WiFi if we turned it on
     if not was_wifi_on then

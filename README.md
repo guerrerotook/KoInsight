@@ -24,6 +24,7 @@
 
 - 📈 Interactive dashboard with charts and insights
 - ✏️ Highlights sync
+- 🖼️ Automatic book cover sync from KOReader
 - 🔄 KOReader plugin for syncing reading stats
 - 📱 Multi-device support
 - 📤 Manual .sqlite upload supported
@@ -31,7 +32,7 @@
 - 🏠 Fully self-hostable (Docker image available)
 
 # Screenshots
-<p><strong>Note:</strong>As of 2025-10-15 covers are not (yet) automatically displayed, as they are not part of the KOReader-generated database. If you want to see covers, you'll need to add them once per book. The UI offers a search by title and upload of images under the tab 'Cover Selector'.</p>
+<p><strong>Note:</strong> Book covers are not part of the KOReader-generated database, so the KOReader plugin extracts them from your book files and uploads them during a full sync ("Synchronize data"). This can be turned off with the "Sync book covers" option in the plugin menu. Covers that can't be extracted (for example DRM-protected books) can still be added manually per book: the UI offers a search by title and an image upload under the tab 'Cover Selector'. A manually chosen cover is never overwritten by the plugin.</p>
 
 <table>
   <tr>

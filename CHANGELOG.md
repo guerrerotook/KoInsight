@@ -4,6 +4,8 @@
 
 ### New Features
 
+Book Cover Sync: The KOReader plugin now extracts the cover embedded in each of your book files and uploads it during a full sync ("Synchronize data"), so covers no longer have to be added manually book by book. Covers are downscaled on the device before upload, and a book is only looked at once. A cover you picked yourself in the web UI is never overwritten. Cover sync can be turned off with the "Sync book covers" option, and "Re-upload book covers" re-checks every book.
+
 Bulk Annotation Sync: The "Synchronize data" button now syncs all annotations from all books in your reading history at once (previously only the currently open book). Sync on suspend still syncs statistics and annotations for the currently open book only (keeping suspend snappy).
 
 ### Bug Fixes
@@ -19,7 +21,7 @@ New syncs won't create duplicates. If you still see duplicates, you most likely 
 
 ### Breaking Changes
 
-Plugin version 0.3.0 required. Update it before syncing.
+Plugin version 0.4.0 required. Update it before syncing.
 
 ---
 

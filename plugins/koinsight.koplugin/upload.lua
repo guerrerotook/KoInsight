@@ -4,6 +4,7 @@ local InfoMessage = require("ui/widget/infomessage")
 local JSON = require("json")
 local KoInsightDbReader = require("db_reader")
 local KoInsightAnnotationReader = require("annotation_reader")
+local KoInsightCoverReader = require("cover_reader")
 local logger = require("logger")
 local UIManager = require("ui/uimanager")
 local const = require("./const")
@@ -11,6 +12,8 @@ local Device = require("device")
 
 local API_UPLOAD_LOCATION = "/api/plugin/import"
 local API_DEVICE_LOCATION = "/api/plugin/device"
+local API_COVER_STATUS_LOCATION = "/api/plugin/covers/status"
+local API_COVER_LOCATION = "/api/plugin/covers/"
 
 local KoInsightUpload = {}
 
@@ -228,8 +231,191 @@ function bulk_sync_all_books(server_url, progress_callback)
   end
 end
 
+function get_cover_headers(body)
+  return {
+    ["Content-Type"] = "image/png",
+    ["Content-Length"] = tostring(#body),
+    -- The body is binary, so the plugin version can't travel in it
+    ["X-KoInsight-Plugin-Version"] = const.VERSION,
+  }
+end
+
+-- Ask the server which of the given books have no cover stored yet.
+-- Returns a set of md5s, or nil when the server doesn't support cover sync.
+function fetch_missing_covers(server_url, md5s)
+  local body = JSON.encode({ md5s = md5s, version = const.VERSION })
+  local url = server_url .. API_COVER_STATUS_LOCATION
+
+  local ok, response = callApi("POST", url, get_headers(body), body, nil, true)
+
+  if not ok or type(response) ~= "table" or type(response.missing) ~= "table" then
+    logger.info("[KoInsight] Cover sync unavailable on this server, skipping covers")
+    return nil
+  end
+
+  local missing = {}
+  for _, md5 in ipairs(response.missing) do
+    missing[md5] = true
+  end
+
+  return missing
+end
+
+-- Extract and upload the cover of a single book.
+-- Returns the value to remember for this book ("uploaded" / "no_cover"), or nil on failure.
+function send_book_cover(server_url, md5, file_path)
+  local data = KoInsightCoverReader.getCoverData(file_path)
+
+  if not data then
+    -- Remember it so we don't re-open a coverless (or unreadable) book on every sync
+    return "no_cover"
+  end
+
+  local ok = callApi(
+    "POST",
+    server_url .. API_COVER_LOCATION .. md5,
+    get_cover_headers(data),
+    data,
+    nil,
+    true
+  )
+
+  if not ok then
+    logger.warn("[KoInsight] Failed to upload cover for book:", md5)
+    return nil
+  end
+
+  logger.info("[KoInsight] Uploaded cover for book:", md5)
+  return "uploaded"
+end
+
+-- Upload covers for all books in the reading history that don't have one on the server yet
+function sync_covers(server_url, settings, progress_callback)
+  if not settings or not settings:getSyncCoversEnabled() then
+    logger.dbg("[KoInsight] Cover sync is disabled, skipping")
+    return
+  end
+
+  local books = KoInsightAnnotationReader.getAllBooksFromHistory()
+
+  if #books == 0 then
+    return
+  end
+
+  local handled = settings:getHandledCovers()
+
+  -- Skip books we already handled locally, and de-duplicate the history
+  local candidates = {}
+  local md5s = {}
+  local seen = {}
+
+  for _, book in ipairs(books) do
+    if handled[book.md5] == nil and not seen[book.md5] then
+      seen[book.md5] = true
+      table.insert(candidates, book)
+      table.insert(md5s, book.md5)
+    end
+  end
+
+  if #candidates == 0 then
+    logger.info("[KoInsight] All book covers are already synced")
+    return
+  end
+
+  local missing = fetch_missing_covers(server_url, md5s)
+
+  -- Server doesn't support cover sync (or is unreachable): degrade silently
+  if missing == nil then
+    return
+  end
+
+  local to_upload = {}
+  for _, book in ipairs(candidates) do
+    if missing[book.md5] then
+      table.insert(to_upload, book)
+    else
+      -- The server already has a cover for this book, no need to look at it again
+      handled[book.md5] = "uploaded"
+    end
+  end
+
+  logger.info("[KoInsight] Uploading covers for", #to_upload, "books")
+
+  local uploaded_count = 0
+
+  for i, book in ipairs(to_upload) do
+    if progress_callback then
+      progress_callback({
+        phase = "covers",
+        current = i,
+        total = #to_upload,
+        book_md5 = book.md5,
+      })
+    end
+
+    local result = send_book_cover(server_url, book.md5, book.file_path)
+
+    if result then
+      handled[book.md5] = result
+      if result == "uploaded" then
+        uploaded_count = uploaded_count + 1
+      end
+    end
+
+    -- Allow the UI to update between books
+    if i < #to_upload then
+      UIManager:nextTick(function() end)
+    end
+  end
+
+  -- Persist once, to avoid hammering the flash storage during the loop
+  settings:setHandledCovers(handled)
+
+  logger.info(
+    string.format("[KoInsight] Cover sync complete: %d/%d uploaded", uploaded_count, #to_upload)
+  )
+
+  return uploaded_count
+end
+
+-- Upload the cover of the currently open book only.
+-- Used on the suspend path, where a full history scan would be far too expensive.
+function sync_current_book_cover(server_url, settings)
+  if not settings or not settings:getSyncCoversEnabled() then
+    return
+  end
+
+  local md5 = KoInsightAnnotationReader.getCurrentBookMd5()
+  local file_path = KoInsightAnnotationReader.getCurrentDocument()
+
+  if not md5 or not file_path or settings:isCoverHandled(md5) then
+    return
+  end
+
+  local missing = fetch_missing_covers(server_url, { md5 })
+
+  if missing == nil then
+    return
+  end
+
+  local handled = settings:getHandledCovers()
+
+  if not missing[md5] then
+    handled[md5] = "uploaded"
+    settings:setHandledCovers(handled)
+    return
+  end
+
+  local result = send_book_cover(server_url, md5, file_path)
+
+  if result then
+    handled[md5] = result
+    settings:setHandledCovers(handled)
+  end
+end
+
 -- Sync current book only (stats + current book annotations)
-function KoInsightUpload.syncCurrentBook(server_url, silent)
+function KoInsightUpload.syncCurrentBook(server_url, silent, settings)
   if silent == nil then
     silent = false
   end
@@ -242,10 +428,13 @@ function KoInsightUpload.syncCurrentBook(server_url, silent)
 
   send_device_data(server_url, silent)
   send_statistics_data(server_url, silent)
+
+  -- Only the current book's cover here: the suspend path must stay cheap
+  sync_current_book_cover(server_url, settings)
 end
 
 -- Sync all books (stats + all book annotations)
-function KoInsightUpload.syncAllBooks(server_url, progress_callback)
+function KoInsightUpload.syncAllBooks(server_url, progress_callback, settings)
   if server_url == nil or server_url == "" then
     UIManager:show(InfoMessage:new({
       text = _("Please configure the server URL first."),
@@ -259,8 +448,29 @@ function KoInsightUpload.syncAllBooks(server_url, progress_callback)
   -- This includes all reading progress (page_stat_data) and book metadata
   send_statistics_data(server_url, true) -- silent
 
-  -- Then, sync all annotations for all books
+  -- Then upload covers for all books. This has to happen after the statistics
+  -- sync, because the server only accepts covers for books it already knows about.
+  sync_covers(server_url, settings, progress_callback)
+
+  -- Finally, sync all annotations for all books
   bulk_sync_all_books(server_url, progress_callback)
+end
+
+-- Forget which covers were already handled and look at every book again.
+-- Covers that already exist on the server are kept, so a manually chosen cover survives.
+function KoInsightUpload.resyncCovers(server_url, settings, progress_callback)
+  if server_url == nil or server_url == "" then
+    UIManager:show(InfoMessage:new({
+      text = _("Please configure the server URL first."),
+    }))
+    return
+  end
+
+  if settings then
+    settings:clearHandledCovers()
+  end
+
+  return sync_covers(server_url, settings, progress_callback)
 end
 
 return KoInsightUpload
