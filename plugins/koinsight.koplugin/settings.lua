@@ -20,6 +20,7 @@ local DEFAULTS = {
   sync_on_suspend = true,
   aggressive_suspend_sync = false,
   suspend_connect_timeout_s = 10, -- clamped to [3, 60]
+  sync_covers = true,
 }
 
 local function open_settings_handle()
@@ -186,6 +187,51 @@ function KoInsightSettings:setSuspendConnectTimeout(sec)
   end
   t = clamp(t, 3, 60)
   return self:update({ suspend_connect_timeout_s = t })
+end
+
+function KoInsightSettings:getSyncCoversEnabled()
+  local value = self.data.sync_covers
+  if value == nil then
+    return DEFAULTS.sync_covers
+  end
+  return value
+end
+function KoInsightSettings:setSyncCoversEnabled(enabled)
+  return self:update({ sync_covers = (enabled == true) })
+end
+function KoInsightSettings:toggleSyncCovers()
+  local new_value = not self:getSyncCoversEnabled()
+  local success = self:setSyncCoversEnabled(new_value)
+
+  if success then
+    local message = new_value and _("Cover sync enabled") or _("Cover sync disabled")
+    UIManager:show(InfoMessage:new({ text = message, timeout = 2 }))
+  else
+    UIManager:show(InfoMessage:new({ text = _("Error toggling cover sync setting"), timeout = 3 }))
+    logger.err("[KoInsight] Failed to toggle sync_covers")
+  end
+
+  return success
+end
+
+-- Covers that have already been handled, keyed by book md5.
+-- Values are "uploaded" or "no_cover" - both mean "don't try again", so that a DRM'd
+-- or coverless book isn't re-extracted on every single sync.
+function KoInsightSettings:getHandledCovers()
+  local value = self.data.handled_covers
+  if type(value) ~= "table" then
+    return {}
+  end
+  return value
+end
+function KoInsightSettings:isCoverHandled(md5)
+  return md5 ~= nil and self:getHandledCovers()[md5] ~= nil
+end
+function KoInsightSettings:setHandledCovers(handled)
+  return self:update({ handled_covers = handled or {} })
+end
+function KoInsightSettings:clearHandledCovers()
+  return self:setHandledCovers({})
 end
 
 function KoInsightSettings:editServerSettings()
