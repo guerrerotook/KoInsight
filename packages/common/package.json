@@ -2,7 +2,22 @@
   "name": "@koinsight/common",
   "version": "v0.2.3",
   "private": true,
-  "type": "module",
+  "exports": {
+    "./types": {
+      "types": "./types/index.ts",
+      "import": "./types/index.ts",
+      "module": "./types/index.ts",
+      "require": "./dist/types/index.js",
+      "default": "./dist/types/index.js"
+    },
+    "./*": {
+      "types": "./*.ts",
+      "import": "./*.ts",
+      "module": "./*.ts",
+      "require": "./dist/*.js",
+      "default": "./dist/*.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch"
