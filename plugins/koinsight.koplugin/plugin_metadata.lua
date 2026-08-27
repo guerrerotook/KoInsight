@@ -66,7 +66,8 @@ end
 function PluginMetadata.getRepository()
   local repository = PluginMetadata.getMeta().repository
 
-  if type(repository) ~= "string" or repository == "" then
+  -- Validated here because it is interpolated into the GitHub API URL.
+  if type(repository) ~= "string" or not repository:match("^[%w._-]+/[%w._-]+$") then
     return nil
   end
 

@@ -3,7 +3,7 @@ name: Plugin Release
 # Packages the KOReader plugin as koinsight.koplugin.zip and attaches it to the
 # GitHub Release. The plugin's built-in updater (plugins/koinsight.koplugin/
 # self_updater.lua) looks for exactly that asset on the latest release, so the
-# asset name must stay in sync with `release_asset_name` there.
+# asset name must stay in sync with RELEASE_ASSET_NAME there.
 on:
   release:
     types: [published]
@@ -27,13 +27,11 @@ jobs:
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           set -eu
-          case "$TAG" in
-            v[0-9]*.[0-9]*.[0-9]*|[0-9]*.[0-9]*.[0-9]*) ;;
-            *)
-              echo "Unsupported release tag: '$TAG' (expected a semver tag such as v1.2.3)" >&2
-              exit 1
-              ;;
-          esac
+          if ! printf '%s' "$TAG" |
+            grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+            echo "Unsupported release tag: '$TAG' (expected a semver tag such as v1.2.3)" >&2
+            exit 1
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 

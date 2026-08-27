@@ -31,7 +31,7 @@ local function request(url, sink)
   local collect_response = sink == nil
 
   socketutil:set_timeout(socketutil.FILE_BLOCK_TIMEOUT, socketutil.FILE_TOTAL_TIMEOUT)
-  local _, code = client.request({
+  local ok, _unused, code = pcall(client.request, {
     url = url,
     method = "GET",
     headers = {
@@ -41,6 +41,11 @@ local function request(url, sink)
     sink = sink or ltn12.sink.table(response),
   })
   socketutil:reset_timeout()
+
+  if not ok then
+    logger.err("[KoInsight] GitHub request errored:", url, tostring(_unused))
+    return false, "Network error"
+  end
 
   if type(code) ~= "number" then
     logger.err("[KoInsight] GitHub request failed:", url, tostring(code))
@@ -74,19 +79,15 @@ function GithubApi.getLatestRelease(repository)
   return request(GithubApi.base_url .. "/repos/" .. repository .. "/releases/latest")
 end
 
----Find a release asset whose name matches `name_pattern` (a Lua pattern).
+---Find the release asset called `name`.
 ---@return table|nil asset
-function GithubApi.findAsset(release, name_pattern)
+function GithubApi.findAsset(release, name)
   if type(release) ~= "table" or type(release.assets) ~= "table" then
     return nil
   end
 
   for _, asset in ipairs(release.assets) do
-    if
-      type(asset) == "table"
-      and type(asset.name) == "string"
-      and asset.name:match(name_pattern)
-    then
+    if type(asset) == "table" and asset.name == name then
       return asset
     end
   end
@@ -141,6 +142,11 @@ function GithubApi.downloadAsset(asset, download_path, progress_callback)
   if not ok or write_error then
     os.remove(download_path)
     return false, write_error or err
+  end
+
+  if bytes_total > 0 and bytes_downloaded ~= bytes_total then
+    os.remove(download_path)
+    return false, "Download was incomplete"
   end
 
   return true

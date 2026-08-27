@@ -17,7 +17,8 @@ if [ -z "$VERSION" ] || [ -z "$REPOSITORY" ]; then
   exit 1
 fi
 
-if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*$'; then
+if ! printf '%s' "$VERSION" |
+  grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
   echo "Invalid version: '$VERSION' (expected semver, e.g. 1.2.3)" >&2
   exit 1
 fi
