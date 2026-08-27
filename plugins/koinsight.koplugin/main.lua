@@ -1,4 +1,5 @@
 local _ = require("gettext")
+local ConfirmBox = require("ui/widget/confirmbox")
 local Dispatcher = require("dispatcher") -- luacheck:ignore
 local InfoMessage = require("ui/widget/infomessage")
 local logger = require("logger")
@@ -7,6 +8,8 @@ local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local KoInsightSettings = require("settings")
 local KoInsightDbReader = require("db_reader")
+local KoInsightSelfUpdater = require("self_updater")
+local PluginMetadata = require("plugin_metadata")
 local JSON = require("json")
 
 local koinsight = WidgetContainer:extend({
@@ -106,7 +109,29 @@ function koinsight:addToMainMenu(menu_items)
         end,
       },
 
-      -- 8) About KoInsight
+      -- 8) Check for plugin updates
+      {
+        text_func = function()
+          if KoInsightSelfUpdater:isPendingRestart() then
+            return _("Update installed - restart KOReader")
+          end
+
+          if KoInsightSelfUpdater:isUpdateAvailable() then
+            return string.format(
+              _("Update to %s"),
+              KoInsightSelfUpdater:getLatestVersion() or ""
+            )
+          end
+
+          return _("Check for plugin update")
+        end,
+        keep_menu_open = true,
+        callback = function()
+          self:checkForPluginUpdate()
+        end,
+      },
+
+      -- 9) About KoInsight
       {
         text = _("About KoInsight"),
         keep_menu_open = true,
@@ -115,6 +140,8 @@ function koinsight:addToMainMenu(menu_items)
           UIManager:show(InfoMessage:new({
             text = "KoInsight is a sync plugin for KoInsight instances.\n\nPlugin version: "
               .. const.VERSION
+              .. "\nRelease: "
+              .. PluginMetadata.getVersion()
               .. "\n\nSee https://github.com/GeorgeSG/koinsight.",
           }))
         end,
@@ -258,6 +285,113 @@ function koinsight:resyncCovers()
       timeout = 5,
     }))
   end)
+end
+
+-- Ask GitHub whether a newer plugin release exists, and offer to install it
+function koinsight:checkForPluginUpdate()
+  if KoInsightSelfUpdater:isPendingRestart() then
+    self:askForRestart()
+    return
+  end
+
+  local checking_info = InfoMessage:new({ text = _("Checking for plugin updates…") })
+  UIManager:show(checking_info)
+
+  local NetworkMgr = require("ui/network/manager")
+  NetworkMgr:runWhenOnline(function()
+    local ok, result = pcall(function()
+      return { KoInsightSelfUpdater:fetchLatestRelease() }
+    end)
+
+    UIManager:close(checking_info)
+
+    if not ok then
+      logger.err("[KoInsight] Update check failed: " .. tostring(result))
+      UIManager:show(
+        InfoMessage:new({ text = _("Could not check for updates."), timeout = 5 })
+      )
+      return
+    end
+
+    local fetched, fetch_error = result[1], result[2]
+
+    if not fetched then
+      UIManager:show(InfoMessage:new({
+        text = string.format(
+          _("Could not check for updates.\n%s"),
+          tostring(fetch_error or "")
+        ),
+        timeout = 5,
+      }))
+      return
+    end
+
+    if not KoInsightSelfUpdater:isUpdateAvailable() then
+      UIManager:show(InfoMessage:new({
+        text = string.format(
+          _("The plugin is up to date (%s)."),
+          KoInsightSelfUpdater:getCurrentVersion()
+        ),
+        timeout = 3,
+      }))
+      return
+    end
+
+    UIManager:show(ConfirmBox:new({
+      text = string.format(
+        _("A new plugin version is available.\n\nInstalled: %s\nAvailable: %s\n\nDownload and install it now?"),
+        KoInsightSelfUpdater:getCurrentVersion(),
+        KoInsightSelfUpdater:getLatestVersion()
+      ),
+      ok_text = _("Update"),
+      ok_callback = function()
+        self:installPluginUpdate()
+      end,
+    }))
+  end)
+end
+
+-- Download and unpack the latest release over the installed plugin
+function koinsight:installPluginUpdate()
+  local progress_info = InfoMessage:new({ text = _("Downloading plugin update…") })
+  UIManager:show(progress_info)
+
+  local NetworkMgr = require("ui/network/manager")
+  NetworkMgr:runWhenOnline(function()
+    local ok, result = pcall(function()
+      return { KoInsightSelfUpdater:install() }
+    end)
+
+    UIManager:close(progress_info)
+
+    if not ok then
+      logger.err("[KoInsight] Plugin update failed: " .. tostring(result))
+      UIManager:show(InfoMessage:new({ text = _("Plugin update failed."), timeout = 5 }))
+      return
+    end
+
+    local installed, install_error = result[1], result[2]
+
+    if not installed then
+      UIManager:show(InfoMessage:new({
+        text = string.format(_("Plugin update failed.\n%s"), tostring(install_error or "")),
+        timeout = 5,
+      }))
+      return
+    end
+
+    self:askForRestart()
+  end)
+end
+
+function koinsight:askForRestart()
+  local message = _("The KoInsight plugin update will be applied after restarting KOReader.")
+
+  if UIManager.askForRestart then
+    UIManager:askForRestart(message)
+  else
+    UIManager:show(InfoMessage:new({ text = message, timeout = 5 }))
+  end
 end
 
 -- Sync when device suspends
