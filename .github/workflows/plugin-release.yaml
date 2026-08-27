@@ -1,0 +1,70 @@
+name: Plugin Release
+
+# Packages the KOReader plugin as koinsight.koplugin.zip and attaches it to the
+# GitHub Release. The plugin's built-in updater (plugins/koinsight.koplugin/
+# self_updater.lua) looks for exactly that asset on the latest release, so the
+# asset name must stay in sync with RELEASE_ASSET_NAME there.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to build and attach the plugin archive to (e.g. v0.2.4)'
+        required: true
+
+jobs:
+  attach-plugin-archive:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Resolve release tag
+        id: release
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -eu
+          if ! printf '%s' "$TAG" |
+            grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+            echo "Unsupported release tag: '$TAG' (expected a semver tag such as v1.2.3)" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Fully qualified so a branch that happens to share the tag's name
+          # cannot be packaged instead of the release itself.
+          ref: refs/tags/${{ steps.release.outputs.tag }}
+
+      - name: Stamp plugin metadata
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -eu
+          ./stamp-plugin-meta.sh "$VERSION" "$REPOSITORY"
+
+      - name: Create plugin archive
+        run: |
+          set -eu
+          cd plugins
+          zip -r ../koinsight.koplugin.zip koinsight.koplugin
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: koinsight.koplugin.zip
+          path: koinsight.koplugin.zip
+          retention-days: 30
+
+      - name: Attach archive to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: gh release upload "$RELEASE_TAG" koinsight.koplugin.zip --clobber

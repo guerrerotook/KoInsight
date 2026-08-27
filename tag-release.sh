@@ -26,6 +26,9 @@ git commit -m "chore: release $VERSION"
 
 # === Tag and push ===
 # Pushing the tag triggers .github/workflows/release.yaml, which builds and
+# Publishing a GitHub release for the tag additionally triggers
+# .github/workflows/plugin-release.yaml, which attaches koinsight.koplugin.zip
+# to the release for the KOReader plugin's self-updater.
 # publishes the multi-arch image to ghcr.io/guerrerotook/koinsight.
 git tag "$VERSION"
 git push origin master
