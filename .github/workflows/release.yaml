@@ -35,7 +35,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/ko-insight/koinsight
+          images: ghcr.io/guerrerotook/koinsight
           # Publish v0.2.3, 0.2.3, and (for non-prerelease tags) latest.
           tags: |
             type=semver,pattern=v{{version}}

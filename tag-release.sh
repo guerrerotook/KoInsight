@@ -26,11 +26,11 @@ git commit -m "chore: release $VERSION"
 
 # === Tag and push ===
 # Pushing the tag triggers .github/workflows/release.yaml, which builds and
-# publishes the multi-arch image to ghcr.io/ko-insight/koinsight.
+# publishes the multi-arch image to ghcr.io/guerrerotook/koinsight.
 git tag "$VERSION"
 git push origin master
 git push origin "$VERSION"
 
 echo "✅ Tagged $VERSION and pushed."
-echo "🚀 GitHub Actions is now building and publishing ghcr.io/ko-insight/koinsight:$VERSION"
-echo "   Track it: https://github.com/Ko-Insight/KoInsight/actions"
+echo "🚀 GitHub Actions is now building and publishing ghcr.io/guerrerotook/koinsight:$VERSION"
+echo "   Track it: https://github.com/guerrerotook/KoInsight/actions"
