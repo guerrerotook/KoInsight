@@ -38,7 +38,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.release.outputs.tag }}
+          # Fully qualified so a branch that happens to share the tag's name
+          # cannot be packaged instead of the release itself.
+          ref: refs/tags/${{ steps.release.outputs.tag }}
 
       - name: Stamp plugin metadata
         env:

@@ -1,6 +1,5 @@
 local Archiver = require("ffi/archiver")
 local DataStorage = require("datastorage")
-local ffiutil = require("ffi/util")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local sha256 = require("ffi/sha2").sha256
@@ -16,6 +15,90 @@ local RELEASE_ASSET_NAME = "koinsight.koplugin.zip"
 
 -- Files an archive must contain for KOReader to consider it a working plugin.
 local REQUIRED_PLUGIN_FILES = { "_meta.lua", "main.lua" }
+
+-- Suffix for the copies made next to their destination during an install.
+local TEMPORARY_SUFFIX = ".koinsight-new"
+
+---Copy `from` to `to`, checking every write. ffiutil.copyFile silently ignores
+---write and close failures, which would let a full disk truncate a plugin file.
+---@return boolean ok
+---@return string|nil error_message
+local function copyFile(from, to)
+  local source, source_error = io.open(from, "rb")
+  if not source then
+    return false, source_error or "Could not read " .. from
+  end
+
+  local destination, destination_error = io.open(to, "wb")
+  if not destination then
+    source:close()
+    return false, destination_error or "Could not write " .. to
+  end
+
+  while true do
+    local chunk = source:read(8192)
+    if not chunk then
+      break
+    end
+
+    local written, write_error = destination:write(chunk)
+    if not written then
+      source:close()
+      destination:close()
+      os.remove(to)
+      return false, write_error or "Could not write " .. to
+    end
+  end
+
+  source:close()
+
+  -- Buffered data is only flushed on close, so this is where a full disk shows.
+  local closed, close_error = destination:close()
+  if not closed then
+    os.remove(to)
+    return false, close_error or "Could not write " .. to
+  end
+
+  return true
+end
+
+---Delete `path` and everything below it. Symlinks are removed, never followed.
+local function removeTree(path, depth)
+  if depth > 8 then
+    return
+  end
+
+  local attributes = lfs.symlinkattributes(path)
+
+  if not attributes then
+    return
+  end
+
+  if attributes.mode ~= "directory" then
+    os.remove(path)
+    return
+  end
+
+  -- Collect the names first: removing entries while the directory handle is
+  -- still being iterated is not well defined.
+  local ok, names = pcall(function()
+    local collected = {}
+    for name in lfs.dir(path) do
+      if name ~= "." and name ~= ".." then
+        table.insert(collected, name)
+      end
+    end
+    return collected
+  end)
+
+  if ok then
+    for _unused, name in ipairs(names) do
+      removeTree(path .. "/" .. name, depth + 1)
+    end
+  end
+
+  lfs.rmdir(path)
+end
 
 ---Split "beta.1" into { "beta", "1" }.
 ---@return table|nil identifiers nil when an identifier is empty or malformed.
@@ -309,17 +392,26 @@ function SelfUpdater:extractPlugin(archive_path, staging_path)
   -- The archive wraps the plugin in its own folder (koinsight.koplugin/...);
   -- locate that prefix so it can be stripped while extracting.
   local plugin_root = nil
-  local entry_paths = {}
+  local entries = {}
+  local seen_paths = {}
 
   for entry in reader:iterate() do
     if entry.mode == "file" and not isUnsafeEntryPath(entry.path) then
+      -- Archiver.Reader keys entries by name, so a second entry with the same
+      -- name would shadow the one validated here. Refuse such archives.
+      if seen_paths[entry.path] then
+        reader:close()
+        return false, _("The downloaded archive contains duplicate files.")
+      end
+      seen_paths[entry.path] = true
+
       local directory, filename = util.splitFilePathName(entry.path)
 
       if filename == "_meta.lua" and (plugin_root == nil or #directory < #plugin_root) then
         plugin_root = directory
       end
 
-      table.insert(entry_paths, entry.path)
+      table.insert(entries, { path = entry.path, index = entry.index })
     end
   end
 
@@ -328,11 +420,14 @@ function SelfUpdater:extractPlugin(archive_path, staging_path)
     return false, _("The downloaded archive does not contain a KOReader plugin.")
   end
 
+  local plugin_entries = {}
   local relative_paths = {}
 
-  for _unused, entry_path in ipairs(entry_paths) do
-    if entry_path:sub(1, #plugin_root) == plugin_root then
-      table.insert(relative_paths, entry_path:sub(#plugin_root + 1))
+  for _unused, entry in ipairs(entries) do
+    if entry.path:sub(1, #plugin_root) == plugin_root then
+      local relative_path = entry.path:sub(#plugin_root + 1)
+      table.insert(plugin_entries, { index = entry.index, relative_path = relative_path })
+      table.insert(relative_paths, relative_path)
     end
   end
 
@@ -354,17 +449,19 @@ function SelfUpdater:extractPlugin(archive_path, staging_path)
     return false, create_error or _("Could not create the staging directory.")
   end
 
-  for _unused, relative_path in ipairs(relative_paths) do
-    local destination = staging_path .. "/" .. relative_path
+  for _unused, entry in ipairs(plugin_entries) do
+    local destination = staging_path .. "/" .. entry.relative_path
     local parent = util.splitFilePathName(destination)
 
     if parent ~= "" then
       util.makePath(parent)
     end
 
-    if not reader:extractToPath(plugin_root .. relative_path, destination) then
+    -- Extract by index rather than by name: it pins the extraction to the very
+    -- entry validated above, and keeps the reader moving forward in one pass.
+    if not reader:extractToPath(entry.index, destination) then
       reader:close()
-      return false, string.format(_("Could not extract %s."), relative_path)
+      return false, string.format(_("Could not extract %s."), entry.relative_path)
     end
   end
 
@@ -372,8 +469,9 @@ function SelfUpdater:extractPlugin(archive_path, staging_path)
   return true, relative_paths
 end
 
----Move the staged files over the installed plugin. Copying from local disk is
----far less likely to fail halfway than unpacking straight into the live folder.
+---Move the staged files over the installed plugin. Every file is first copied
+---next to its destination and only renamed into place once all of them are on
+---disk, so a failure part-way through cannot leave a half-updated plugin.
 ---@return boolean ok
 ---@return string|nil error_message
 function SelfUpdater:installStagedFiles(staging_path, relative_paths, target_path)
@@ -383,36 +481,55 @@ function SelfUpdater:installStagedFiles(staging_path, relative_paths, target_pat
     return false, create_error or _("Could not create the plugin directory.")
   end
 
+  local pending = {}
+
+  local function discardPending()
+    for _unused, entry in ipairs(pending) do
+      os.remove(entry.temporary)
+    end
+  end
+
   for _unused, relative_path in ipairs(relative_paths) do
     local destination = target_path .. "/" .. relative_path
-    local parent = util.splitFilePathName(destination)
+    local parent, filename = util.splitFilePathName(destination)
 
     if parent ~= "" then
       util.makePath(parent)
     end
 
-    local copy_error = ffiutil.copyFile(staging_path .. "/" .. relative_path, destination)
+    -- The temporary file has to be a sibling of its destination for the rename
+    -- below to stay within one filesystem.
+    local temporary = parent .. "." .. filename .. TEMPORARY_SUFFIX
+    local copied, copy_error = copyFile(staging_path .. "/" .. relative_path, temporary)
 
-    if copy_error then
+    if not copied then
+      logger.err("[KoInsight] Could not stage", destination, copy_error)
+      discardPending()
       return false, string.format(_("Could not install %s."), relative_path)
+    end
+
+    table.insert(pending, { temporary = temporary, destination = destination })
+  end
+
+  for _unused, entry in ipairs(pending) do
+    local renamed, rename_error = os.rename(entry.temporary, entry.destination)
+
+    if not renamed then
+      -- The data is already on disk, so this only fails for reasons a retry
+      -- would not fix. Leave what was renamed in place: those files are
+      -- complete, and the remaining ones still hold the previous release.
+      logger.err("[KoInsight] Could not replace", entry.destination, rename_error)
+      discardPending()
+      return false, string.format(_("Could not install %s."), entry.destination)
     end
   end
 
   return true
 end
 
-function SelfUpdater:removeStaging(staging_path, relative_paths)
-  for _unused, relative_path in ipairs(relative_paths or {}) do
-    util.removeFile(staging_path .. "/" .. relative_path)
-  end
-
-  -- Only ever holds the flat contents of the plugin archive, so a plain rmdir
-  -- is enough; anything left behind is harmless and gets overwritten next time.
-  local removed, remove_error = lfs.rmdir(staging_path)
-
-  if not removed then
-    logger.dbg("[KoInsight] Could not clean up", staging_path, remove_error)
-  end
+---Delete `staging_path` and everything below it.
+function SelfUpdater:removeStaging(staging_path)
+  removeTree(staging_path, 0)
 end
 
 ---Download and install the latest release over the running plugin.
@@ -426,7 +543,10 @@ function SelfUpdater:install(progress_callback)
     return false, download_path
   end
 
+  -- Clear anything a previously interrupted run may have left behind.
   local staging_path = self:getCacheDirectory() .. "/staging"
+  self:removeStaging(staging_path)
+
   local extracted, relative_paths = self:extractPlugin(download_path, staging_path)
 
   util.removeFile(download_path)
@@ -439,12 +559,11 @@ function SelfUpdater:install(progress_callback)
   local installed, install_error =
     self:installStagedFiles(staging_path, relative_paths, PluginMetadata.getPluginPath())
 
-  self:removeStaging(staging_path, relative_paths)
+  self:removeStaging(staging_path)
 
   if not installed then
     return false, install_error
   end
-
   self.pending_restart = true
   logger.info("[KoInsight] Plugin updated, restart pending")
 

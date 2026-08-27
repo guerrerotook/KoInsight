@@ -76,6 +76,8 @@ end
 ---@return boolean ok
 ---@return table|string release The release object, or an error message.
 function GithubApi.getLatestRelease(repository)
+  -- /releases/latest deliberately skips prereleases: the updater only ever
+  -- offers stable builds, even to someone running a prerelease.
   return request(GithubApi.base_url .. "/repos/" .. repository .. "/releases/latest")
 end
 
