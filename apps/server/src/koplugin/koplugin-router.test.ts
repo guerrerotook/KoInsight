@@ -1,9 +1,19 @@
 import express from 'express';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import path from 'path';
 import request from 'supertest';
+import { appConfig } from '../config';
+import { createBook } from '../db/factories/book-factory';
 import { createDevice } from '../db/factories/device-factory';
 import { fakeKoReaderAnnotation } from '../db/factories/koreader-annotation-factory';
 import { db } from '../knex';
-import { kopluginRouter, REQUIRED_PLUGIN_VERSION } from './koplugin-router';
+import { kopluginRouter, MAX_COVER_SIZE_BYTES, REQUIRED_PLUGIN_VERSION } from './koplugin-router';
+
+const PNG_BYTES = Buffer.concat([
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  Buffer.from('fake png contents'),
+]);
 
 describe('koplugin-router', () => {
   const app = express();
@@ -203,13 +213,11 @@ describe('koplugin-router', () => {
     });
 
     it('returns 400 when plugin version is incorrect', async () => {
-      const response = await request(app)
-        .post('/koplugin/import')
-        .send({
-          version: '0.1.0',
-          books: [],
-          stats: [],
-        });
+      const response = await request(app).post('/koplugin/import').send({
+        version: '0.1.0',
+        books: [],
+        stats: [],
+      });
 
       expect(response.status).toBe(400);
       expect(response.body.error).toContain('Unsupported plugin version');
@@ -241,6 +249,186 @@ describe('koplugin-router', () => {
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toBe('application/zip');
       expect(response.headers['content-disposition']).toContain('koinsight.plugin.zip');
+    });
+  });
+
+  describe('covers', () => {
+    const originalCoversPath = appConfig.coversPath;
+    let coversPath: string;
+
+    beforeEach(() => {
+      coversPath = mkdtempSync(path.join(tmpdir(), 'koinsight-covers-'));
+      appConfig.coversPath = coversPath;
+    });
+
+    afterEach(() => {
+      rmSync(coversPath, { recursive: true, force: true });
+      appConfig.coversPath = originalCoversPath;
+    });
+
+    describe('POST /koplugin/covers/status', () => {
+      it('returns only the md5s without a stored cover', async () => {
+        const withCover = 'a'.repeat(32);
+        const withoutCover = 'b'.repeat(32);
+        writeFileSync(path.join(coversPath, `${withCover}.png`), PNG_BYTES);
+
+        const response = await request(app)
+          .post('/koplugin/covers/status')
+          .send({ version: REQUIRED_PLUGIN_VERSION, md5s: [withCover, withoutCover] });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({ missing: [withoutCover] });
+      });
+
+      it('ignores invalid md5s', async () => {
+        const response = await request(app)
+          .post('/koplugin/covers/status')
+          .send({ version: REQUIRED_PLUGIN_VERSION, md5s: ['not-an-md5', '../../etc/passwd'] });
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({ missing: [] });
+      });
+
+      it('returns 400 when md5s are missing', async () => {
+        const response = await request(app)
+          .post('/koplugin/covers/status')
+          .send({ version: REQUIRED_PLUGIN_VERSION });
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({ error: 'Missing md5s' });
+      });
+
+      it('returns 400 when plugin version is incorrect', async () => {
+        const response = await request(app)
+          .post('/koplugin/covers/status')
+          .send({ version: '0.1.0', md5s: [] });
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toContain('Unsupported plugin version');
+      });
+    });
+
+    describe('POST /koplugin/covers/:md5', () => {
+      const postCover = (md5: string, body: Buffer, query = '') =>
+        request(app)
+          .post(`/koplugin/covers/${md5}${query}`)
+          .set('X-KoInsight-Plugin-Version', REQUIRED_PLUGIN_VERSION)
+          .set('Content-Type', 'image/png')
+          .send(body);
+
+      it('stores the uploaded cover under the book md5', async () => {
+        const book = await createBook(db, { md5: 'c'.repeat(32) });
+
+        const response = await postCover(book.md5, PNG_BYTES);
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({ message: 'Cover uploaded' });
+
+        const storedPath = path.join(coversPath, `${book.md5}.png`);
+        expect(existsSync(storedPath)).toBe(true);
+        expect(readFileSync(storedPath)).toEqual(PNG_BYTES);
+      });
+
+      it('does not overwrite an existing cover', async () => {
+        const book = await createBook(db, { md5: 'd'.repeat(32) });
+        const existing = path.join(coversPath, `${book.md5}.jpg`);
+        writeFileSync(existing, Buffer.from('existing cover'));
+
+        const response = await postCover(book.md5, PNG_BYTES);
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({ message: 'Cover already exists' });
+        expect(readFileSync(existing).toString()).toBe('existing cover');
+      });
+
+      it('overwrites an existing cover when forced', async () => {
+        const book = await createBook(db, { md5: 'e'.repeat(32) });
+        writeFileSync(path.join(coversPath, `${book.md5}.jpg`), Buffer.from('existing cover'));
+
+        const response = await postCover(book.md5, PNG_BYTES, '?force=true');
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({ message: 'Cover uploaded' });
+        expect(readdirSync(coversPath)).toEqual([`${book.md5}.png`]);
+      });
+
+      it('returns 400 for an md5 that could escape the covers directory', async () => {
+        const response = await postCover('..%2f..%2fescaped', PNG_BYTES);
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({ error: 'Invalid book md5' });
+        expect(readdirSync(coversPath)).toEqual([]);
+      });
+
+      it('returns 400 for an md5 that is not 32 hex characters', async () => {
+        const response = await postCover('z'.repeat(32), PNG_BYTES);
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({ error: 'Invalid book md5' });
+      });
+
+      it('returns 400 when the body is not a supported image', async () => {
+        const book = await createBook(db, { md5: 'f'.repeat(32) });
+
+        const response = await postCover(book.md5, Buffer.from('<html>not an image</html>'));
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({ error: 'Unsupported image format' });
+        expect(readdirSync(coversPath)).toEqual([]);
+      });
+
+      it('returns 400 when the body is empty', async () => {
+        const book = await createBook(db, { md5: '0'.repeat(32) });
+
+        const response = await postCover(book.md5, Buffer.alloc(0));
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({ error: 'Missing cover data' });
+      });
+
+      it('returns 404 for an unknown book', async () => {
+        const response = await postCover('1'.repeat(32), PNG_BYTES);
+
+        expect(response.status).toBe(404);
+        expect(response.body).toEqual({ error: 'Book not found' });
+        expect(readdirSync(coversPath)).toEqual([]);
+      });
+
+      it('returns 413 when the cover is too large', async () => {
+        const book = await createBook(db, { md5: '2'.repeat(32) });
+        const tooLarge = Buffer.concat([PNG_BYTES, Buffer.alloc(MAX_COVER_SIZE_BYTES)]);
+
+        const response = await postCover(book.md5, tooLarge);
+
+        expect(response.status).toBe(413);
+        expect(response.body).toEqual({ error: 'Cover too large' });
+        expect(readdirSync(coversPath)).toEqual([]);
+      });
+
+      it('returns 400 when plugin version is incorrect', async () => {
+        const book = await createBook(db, { md5: '3'.repeat(32) });
+
+        const response = await request(app)
+          .post(`/koplugin/covers/${book.md5}`)
+          .set('X-KoInsight-Plugin-Version', '0.1.0')
+          .set('Content-Type', 'image/png')
+          .send(PNG_BYTES);
+
+        expect(response.status).toBe(400);
+        expect(response.body.error).toContain('Unsupported plugin version');
+      });
+
+      it('accepts the plugin version from the query string', async () => {
+        const book = await createBook(db, { md5: '4'.repeat(32) });
+
+        const response = await request(app)
+          .post(`/koplugin/covers/${book.md5}?version=${REQUIRED_PLUGIN_VERSION}`)
+          .set('Content-Type', 'image/png')
+          .send(PNG_BYTES);
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({ message: 'Cover uploaded' });
+      });
     });
   });
 });

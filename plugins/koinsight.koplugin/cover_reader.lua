@@ -1,6 +1,4 @@
 local DataStorage = require("datastorage")
-local DocumentRegistry = require("document/documentregistry")
-local RenderImage = require("ui/renderimage")
 local logger = require("logger")
 
 local KoInsightCoverReader = {}
@@ -18,6 +16,17 @@ local function get_live_ui()
     ReaderUI_ok, ReaderUI = pcall(require, "apps/reader/readerui")
   end
   return (ReaderUI_ok and ReaderUI and ReaderUI.instance) or nil
+end
+
+-- Loaded on demand so that a failure to load them can never break plugin startup
+local function get_document_registry()
+  local ok, DocumentRegistry = pcall(require, "document/documentregistry")
+  return ok and DocumentRegistry or nil
+end
+
+local function get_render_image()
+  local ok, RenderImage = pcall(require, "ui/renderimage")
+  return ok and RenderImage or nil
 end
 
 local function temp_cover_path()
@@ -55,6 +64,12 @@ end
 -- Returns a downscaled copy of the cover, or nil when no scaling is needed.
 -- The caller is responsible for freeing both the original and the returned buffer.
 local function scale_cover(bb)
+  local RenderImage = get_render_image()
+
+  if not RenderImage then
+    return nil
+  end
+
   local width, height = bb:getWidth(), bb:getHeight()
 
   if not width or not height or width == 0 or height == 0 then
@@ -98,6 +113,12 @@ local function extract_cover(file_path)
   if ui and ui.document and ui.document.file == file_path then
     document = ui.document
   else
+    local DocumentRegistry = get_document_registry()
+
+    if not DocumentRegistry then
+      return nil
+    end
+
     document = DocumentRegistry:openDocument(file_path)
     close_document = document ~= nil
 
