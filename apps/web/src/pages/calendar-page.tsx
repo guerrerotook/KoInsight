@@ -1,24 +1,25 @@
 import { BookWithData, PageStat } from '@koinsight/common/types';
 import { Book } from '@koinsight/common/types/book';
-import { Anchor, Flex, Loader, Title } from '@mantine/core';
-import { IconClock } from '@tabler/icons-react';
+import { Anchor, Flex, Loader, Switch, Title } from '@mantine/core';
 import { startOfDay } from 'date-fns/startOfDay';
-import { sum, uniq } from 'ramda';
-import { JSX, useCallback, useMemo } from 'react';
+import { uniq } from 'ramda';
+import { JSX, useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { useBooks } from '../api/books';
 import { usePageStats } from '../api/use-page-stats';
 import { Calendar, CalendarEvent } from '../components/calendar/calendar';
 import { getBookPath } from '../routes';
-import { getDuration, shortDuration } from '../utils/dates';
 import { CalendarBookDay } from '../components/calendar/calendar-book-day';
 
 type DayData = {
   events: PageStat[];
 };
 
+const MINIMUM_SESSION_DURATION = 60;
+
 export function CalendarPage(): JSX.Element {
   const { data: books, isLoading } = useBooks();
+  const [hideShortSessions, setHideShortSessions] = useState(false);
   const {
     data: { stats: events },
     isLoading: eventsLoading,
@@ -43,8 +44,32 @@ export function CalendarPage(): JSX.Element {
       return acc;
     }, {});
 
-    return eventsList;
-  }, [events, eventsLoading]);
+    if (!hideShortSessions) {
+      return eventsList;
+    }
+
+    return Object.entries(eventsList).reduce<Record<string, CalendarEvent<DayData>>>(
+      (acc, [key, entry]) => {
+        const dayEvents = entry.data?.events ?? [];
+
+        const durationByBook = dayEvents.reduce<Record<string, number>>((totals, event) => {
+          totals[event.book_md5] = (totals[event.book_md5] ?? 0) + event.duration;
+          return totals;
+        }, {});
+
+        const filteredEvents = dayEvents.filter(
+          (event) => durationByBook[event.book_md5] >= MINIMUM_SESSION_DURATION
+        );
+
+        if (filteredEvents.length > 0) {
+          acc[key] = { ...entry, data: { events: filteredEvents } };
+        }
+
+        return acc;
+      },
+      {}
+    );
+  }, [events, eventsLoading, hideShortSessions]);
 
   const getBookByMd5 = useCallback(
     (md5: Book['md5']) => books?.find((book) => book.md5 === md5),
@@ -85,7 +110,14 @@ export function CalendarPage(): JSX.Element {
 
   return (
     <>
-      <Title mb="xl">Calendar</Title>
+      <Flex justify="space-between" align="center" mb="xl" wrap="wrap" gap="md">
+        <Title>Calendar</Title>
+        <Switch
+          label="Hide entries under a minute"
+          checked={hideShortSessions}
+          onChange={(event) => setHideShortSessions(event.currentTarget.checked)}
+        />
+      </Flex>
       <Calendar<DayData>
         events={calendarEvents}
         dayRenderer={(data) => getBookNames(data).map((el) => <div>{el}</div>)}
