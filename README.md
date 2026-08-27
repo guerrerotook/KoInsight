@@ -100,7 +100,7 @@ Currently, there are two ways to do this:
 The KoInsight plugin syncs your reading statistics from KOReader to KoInsight.
 
 **Installation:**
-1. Download the plugin ZIP bundle from the **"KOReader Plugin"** button in the main menu.
+1. Download the plugin ZIP bundle from the **"KOReader Plugin"** button in the main menu, or grab `koinsight.koplugin.zip` from the [latest GitHub release](https://github.com/guerrerotook/KoInsight/releases/latest).
 1. Extract it into your `KOReader/plugins/` folder.
 1. For the plugin to be installed correctly, the file structure should look like this:
     ```
@@ -120,6 +120,10 @@ The KoInsight plugin syncs your reading statistics from KOReader to KoInsight.
 1. Click **Sync** in the KoInsight plugin menu.
 
 Reload the KoInsight web dashboard. If everything went well (🤞), your data should appear.
+
+**Updating:**
+
+The plugin can update itself. Open the **KoInsight** menu in KOReader and tap **Check for plugin update**: it looks for the newest release of this repository, and when one is available it downloads `koinsight.koplugin.zip`, verifies its checksum and unpacks it over the installed plugin. Restart KOReader afterwards to load the new version.
 
 ### Manual Upload: `statistics.sqlite`
 1. Open a file manager on your KOReader device.

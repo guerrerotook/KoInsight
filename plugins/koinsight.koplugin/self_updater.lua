@@ -275,8 +275,7 @@ function SelfUpdater:install(progress_callback)
     return false, download_path
   end
 
-  local extracted, extract_error =
-    self:extractPlugin(download_path, PluginMetadata.getPluginPath())
+  local extracted, extract_error = self:extractPlugin(download_path, PluginMetadata.getPluginPath())
 
   util.removeFile(download_path)
 

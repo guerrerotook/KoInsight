@@ -117,10 +117,7 @@ function koinsight:addToMainMenu(menu_items)
           end
 
           if KoInsightSelfUpdater:isUpdateAvailable() then
-            return string.format(
-              _("Update to %s"),
-              KoInsightSelfUpdater:getLatestVersion() or ""
-            )
+            return string.format(_("Update to %s"), KoInsightSelfUpdater:getLatestVersion() or "")
           end
 
           return _("Check for plugin update")
@@ -294,11 +291,14 @@ function koinsight:checkForPluginUpdate()
     return
   end
 
-  local checking_info = InfoMessage:new({ text = _("Checking for plugin updates…") })
-  UIManager:show(checking_info)
-
   local NetworkMgr = require("ui/network/manager")
   NetworkMgr:runWhenOnline(function()
+    -- Shown here rather than before going online, so that a cancelled Wi-Fi
+    -- prompt does not leave the message on screen forever.
+    local checking_info = InfoMessage:new({ text = _("Checking for plugin updates…") })
+    UIManager:show(checking_info)
+    UIManager:forceRePaint()
+
     local ok, result = pcall(function()
       return { KoInsightSelfUpdater:fetchLatestRelease() }
     end)
@@ -307,9 +307,7 @@ function koinsight:checkForPluginUpdate()
 
     if not ok then
       logger.err("[KoInsight] Update check failed: " .. tostring(result))
-      UIManager:show(
-        InfoMessage:new({ text = _("Could not check for updates."), timeout = 5 })
-      )
+      UIManager:show(InfoMessage:new({ text = _("Could not check for updates."), timeout = 5 }))
       return
     end
 
@@ -317,10 +315,7 @@ function koinsight:checkForPluginUpdate()
 
     if not fetched then
       UIManager:show(InfoMessage:new({
-        text = string.format(
-          _("Could not check for updates.\n%s"),
-          tostring(fetch_error or "")
-        ),
+        text = string.format(_("Could not check for updates.\n%s"), tostring(fetch_error or "")),
         timeout = 5,
       }))
       return
@@ -339,7 +334,7 @@ function koinsight:checkForPluginUpdate()
 
     UIManager:show(ConfirmBox:new({
       text = string.format(
-        _("A new plugin version is available.\n\nInstalled: %s\nAvailable: %s\n\nDownload and install it now?"),
+        _("Plugin update available.\n\nInstalled: %s\nAvailable: %s\n\nInstall it now?"),
         KoInsightSelfUpdater:getCurrentVersion(),
         KoInsightSelfUpdater:getLatestVersion()
       ),
@@ -353,11 +348,12 @@ end
 
 -- Download and unpack the latest release over the installed plugin
 function koinsight:installPluginUpdate()
-  local progress_info = InfoMessage:new({ text = _("Downloading plugin update…") })
-  UIManager:show(progress_info)
-
   local NetworkMgr = require("ui/network/manager")
   NetworkMgr:runWhenOnline(function()
+    local progress_info = InfoMessage:new({ text = _("Downloading plugin update…") })
+    UIManager:show(progress_info)
+    UIManager:forceRePaint()
+
     local ok, result = pcall(function()
       return { KoInsightSelfUpdater:install() }
     end)

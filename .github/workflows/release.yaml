@@ -1,7 +1,9 @@
 name: Release
 
 # Builds and publishes the multi-arch Docker image to GHCR whenever a version
-# tag (e.g. v0.2.3) is pushed.
+# tag (e.g. v0.2.3) is pushed. The KOReader plugin bundled in the image (served
+# by the "KOReader Plugin" download button) is stamped with the same version, so
+# it matches the archive attached to the GitHub Release by plugin-release.yaml.
 on:
   push:
     tags:
@@ -17,6 +19,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Stamp plugin metadata
+        env:
+          TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: ./stamp-plugin-meta.sh "${TAG#v}" "$REPOSITORY"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

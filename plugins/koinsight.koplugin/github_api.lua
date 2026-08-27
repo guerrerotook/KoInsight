@@ -82,7 +82,11 @@ function GithubApi.findAsset(release, name_pattern)
   end
 
   for _, asset in ipairs(release.assets) do
-    if type(asset) == "table" and type(asset.name) == "string" and asset.name:match(name_pattern) then
+    if
+      type(asset) == "table"
+      and type(asset.name) == "string"
+      and asset.name:match(name_pattern)
+    then
       return asset
     end
   end

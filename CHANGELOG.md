@@ -4,6 +4,10 @@
 
 ### New Features
 
+Plugin Self-Update: The KOReader plugin can now update itself. "Check for plugin update" in the KoInsight menu looks up the newest release of this repository, downloads the `koinsight.koplugin.zip` attached to it, verifies its SHA-256 checksum and unpacks it over the installed plugin. KOReader has to be restarted to load the new version.
+
+Plugin Release Archive: Publishing a GitHub release now automatically builds `koinsight.koplugin.zip` and attaches it to that release, so the self-updater (and anyone who prefers to install by hand) always has an up-to-date bundle.
+
 Book Cover Sync: The KOReader plugin now extracts the cover embedded in each of your book files and uploads it during a full sync ("Synchronize data"), so covers no longer have to be added manually book by book. Covers are downscaled on the device before upload, and a book is only looked at once. A cover you picked yourself in the web UI is never overwritten. Cover sync can be turned off with the "Sync book covers" option, and "Re-upload book covers" re-checks every book.
 
 Bulk Annotation Sync: The "Synchronize data" button now syncs all annotations from all books in your reading history at once (previously only the currently open book). Sync on suspend still syncs statistics and annotations for the currently open book only (keeping suspend snappy).
