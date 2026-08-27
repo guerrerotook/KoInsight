@@ -84,9 +84,16 @@ export class CoversService {
     }
 
     this.ensureCoversDir();
-    await this.deleteExistingByMd5(md5);
 
-    const filePath = path.join(appConfig.coversPath, `${md5}${extension}`);
+    const coversDir = path.resolve(appConfig.coversPath);
+    const filePath = path.resolve(coversDir, `${path.basename(md5)}${extension}`);
+
+    // Defence in depth: never write outside of the covers directory
+    if (path.dirname(filePath) !== coversDir) {
+      throw new Error('Invalid cover path');
+    }
+
+    await this.deleteExistingByMd5(md5);
     await promises.writeFile(filePath, data);
 
     return filePath;

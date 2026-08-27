@@ -9,6 +9,10 @@ const GIF_MAGIC = Buffer.from('GIF8', 'ascii');
  * Sniffing the content is safer than trusting a client-provided content type or filename.
  */
 export function detectImageExtension(data: Buffer): string | null {
+  if (!Buffer.isBuffer(data)) {
+    return null;
+  }
+
   if (data.length >= PNG_MAGIC.length && data.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC)) {
     return '.png';
   }
