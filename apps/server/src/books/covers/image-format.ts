@@ -8,20 +8,21 @@ const GIF_MAGIC = Buffer.from('GIF8', 'ascii');
  *
  * Sniffing the content is safer than trusting a client-provided content type or filename.
  */
-export function detectImageExtension(data: Buffer): string | null {
+export function detectImageExtension(data: unknown): string | null {
   if (!Buffer.isBuffer(data)) {
     return null;
   }
 
-  if (data.length >= PNG_MAGIC.length && data.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC)) {
+  // `equals` also compares lengths, so a buffer shorter than the magic never matches
+  if (data.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC)) {
     return '.png';
   }
 
-  if (data.length >= JPEG_MAGIC.length && data.subarray(0, JPEG_MAGIC.length).equals(JPEG_MAGIC)) {
+  if (data.subarray(0, JPEG_MAGIC.length).equals(JPEG_MAGIC)) {
     return '.jpg';
   }
 
-  if (data.length >= GIF_MAGIC.length && data.subarray(0, GIF_MAGIC.length).equals(GIF_MAGIC)) {
+  if (data.subarray(0, GIF_MAGIC.length).equals(GIF_MAGIC)) {
     return '.gif';
   }
 
